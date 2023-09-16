@@ -1,0 +1,3 @@
+[submodule "inst/sfaira"]
+	path = inst/sfaira
+	url = https://github.com/vjcitn/sfaira

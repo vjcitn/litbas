@@ -1,0 +1,153 @@
+---
+title: "BiocSfaira overview"
+author: "Vincent J. Carey, stvjc at channing.harvard.edu"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+vignette: >
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteIndexEntry{BiocSfaira overview}
+  %\VignetteEncoding{UTF-8}
+output:
+  BiocStyle::html_document:
+    highlight: pygments
+    number_sections: yes
+    theme: united
+    toc: yes
+---
+
+# Introduction
+
+This works through some of the components of the Sfaira UI
+tutorial notebook.
+
+# Setup
+
+Install via `BiocManager::install('vjcitn/litbas')`
+
+This uses a simple configuration approach specified in
+DESCRIPTION to acquire necessary python infrastructure.
+As the sfaira code is run, additional infrastructure
+may be loaded by python functions.  Typically caching
+is used so these are one-time events.
+
+```{r lk1,message=FALSE}
+set.seed(123)
+library(litbas)
+library(zellkonverter)
+library(SingleCellExperiment)
+library(plotly)
+```
+
+# Resources
+
+Sfaira provides embeddings (projections from high-dimensional
+expression quantifications to low-dimension 'latent spaces')
+and type-assignment resources, all tissue- and organism-specific.
+
+```{r lk2}
+ref = sfaira_ref()
+ui = sfaira_ui(ref)
+ems = ui$zoo_embedding$available_model_ids
+sample(ems, size=10)
+```
+
+We'll pick an embedding in the next section.
+
+```{r lk3}
+cts = ui$zoo_celltype$available_model_ids
+sample(cts, size=10)
+```
+
+The models are either multilayer perceptron or 'marker'-based.
+This is tersely explained in the [Genome Biology
+paper](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-021-02452-6).
+
+> Multilayer perceptron model
+We used dense layer stacks (multilayer perceptron) to predict cell types from gene ex-
+pression data. An example multilayer perceptron for cell type prediction used in this
+study was trained on all protein coding genes from either mouse or human, had one
+hidden layer of the size (128), was trained without L1 and L2 penalties on the parame-
+ters, and with a selu activation function.
+
+> Marker model
+We defined a marker gene-dominated model to predict cell types from gene expression
+data. In this model, a sigmoid function based on a gene-specific linear embedding of
+the gene expression values models an expression threshold. After this gene-wise em-
+bedding, a fully connected layer pools information from all genes to the cell type
+prediction.
+
+# Using an autoencoder trained on blood to classify PBMCs
+
+First we use the UI components to pick our resources.
+```{r runp}
+ui$zoo_embedding$model_id = "embedding_human-blood-ae-0.2-0.1_theislab"
+ui$zoo_celltype$model_id = "celltype_human-blood-mlp-0.1.3-0.1_theislab"
+```
+
+We use scanpy's datasets library to get an AnnData representation
+of expression patterns for around 3000 PBMCs.
+
+```{r dosc}
+sc = scanpy_ref()
+p = sc$datasets$pbmc3k()
+```
+
+Now we load the AnnData into the UI component and
+run the embedding and type prediction procedures.
+
+```{r doload}
+ui$load_data(p, gene_symbol_col='index', gene_ens_col='gene_ids')
+ui$load_model_celltype()
+ui$load_model_embedding()
+ui$predict_all() 
+ui$data$adata
+```
+
+This new AnnData instance can be used to explore the
+embedding and the labeling.  But we'll do it with SingleCellExperiment.
+
+# Converting and exploring
+
+
+```{r doconv}
+library(zellkonverter)
+sce = AnnData2SCE(ui$data$adata)
+sce
+dim(reducedDim(sce))
+tail(sort(table(sce$celltypes_sfaira)))
+```
+
+The embedding has 64 columns:
+```{r lkpr}
+pairs(reducedDim(sce)[,1:4])
+```
+```{r lkpr2}
+pairs(reducedDim(sce)[,61:64])
+```
+
+The tutorial suggests the following steps for visualization:
+```{r dovis}
+sc$pp$neighbors(ui$data$adata, use_rep="X_sfaira")
+sc$tl$umap(ui$data$adata)
+```
+The previous commands add components to the AnnData representation.
+We extract the UMAP to R and plot, coloring by labels.
+```{r doex}
+um = ui$data$adata$obsm["X_umap"] 
+ct = ui$data$adata$obs$celltypes_sfaira 
+plot(um, col=as.numeric(factor(ct)))
+```
+
+We can use R's visualization tools now to help explore interactively.
+Exercise: make an interactive visualization using ggplotly.
+
+Solution:
+```{r doplo}
+library(ggplot2)
+library(plotly)
+umdf = data.frame(um, type=ct)
+gp2 = ggplot(umdf, aes(x=X1, y=X2, text=type, colour=type)) + geom_point()
+ggplotly(gp2)
+```
+
+Exercise: Produce a 3 dimensional UMAP projection and use threejs
+to produce a rotatable 3-d visualization.
